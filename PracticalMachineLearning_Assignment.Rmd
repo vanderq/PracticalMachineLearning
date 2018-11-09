@@ -1,0 +1,164 @@
+---
+title: "Coursera Data Science - Practical Machine Learning Assignment"
+author: "Alexander van der Kuijl"
+date: "September 9, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this article we are going to explore the following question: can we predict how well a barbell lift is executed based on accelerometer data. The data is provided in the Weight Lifting Exercise Dataset, provided by Groupware@LES.
+It contains 160 variables, one of them being a Classe variable indicating whether the exercise was performed correctly (Classe A), or incorrectly (Classe B-E).
+We are going to investigate whether the other variables (device measurements during the exercise) can be used together to create a prediction model to predict whether the weight lifting exercise was performed correctly (i.e. the Classe variable).
+
+
+## Data reading and preparation
+
+We read the provided data set (csv-file) in and create testing and training set.
+
+```{r ReadData, cache=FALSE}
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(e1071))
+pmlTrain <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+set.seed(3456)
+inTrain <- createDataPartition(pmlTrain$classe, p=0.6, list=FALSE)
+myTraining <- pmlTrain[inTrain, ]
+myTesting <- pmlTrain[-inTrain, ]
+dim(myTraining); dim(myTesting)
+
+```
+
+Not all of the 160 variables will be of interest with respect to the prediction.
+Therefore we do an initial filtering using near-zero variance analysis.
+We also remove the columns that are having too many NAs as well as the first 5 columns.
+
+```{r CleanData, cache=FALSE}
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+myTraining <- myTraining[,nzv$nzv==FALSE]
+
+# nzv2<- nearZeroVar(myTesting,saveMetrics=TRUE)
+myTesting <- myTesting[,nzv$nzv==FALSE]
+
+myTraining <- myTraining[-c(1, 3, 4, 5)]
+myTesting <- myTesting[-c(1, 3, 4, 5)]
+
+# Remove columns with too many NAs
+okColumns <- colMeans(is.na(myTraining)) < .75
+
+finalMyTraining <- myTraining[, okColumns]
+finalMyTesting <- myTesting[, okColumns]
+
+dim(finalMyTraining)
+dim(finalMyTesting)
+```
+
+The resulting dataset has 55 columns, already quite less than the initial 160.
+
+## Exploratory Data Analysis
+
+In the Exploratory Data Analysis we are plotting each variable against the Classe variable to determine whether we can visually determine correlations, patterns, etc. between the predictors and the outcome.
+This can also be used to further reduce the variables we are going to include in our prediction model.
+We have created a script that generates a boxplot and a violin plot for each variable. The plots for one of the variables can be found in the Appendix.
+
+
+## Model Creation
+
+We will look at various models to build a prediction model, and use our own created test data set to assess the performance.
+
+* Decision Tree
+```{r decisiontree, cache=TRUE}
+suppressPackageStartupMessages(library(rpart))
+fitRPart <- rpart(classe ~ ., data=finalMyTraining, method="class")
+predictionsRPart <- predict(fitRPart, finalMyTesting, type = "class")
+``` 
+
+* Random Forest
+```{r randomforest, cache=TRUE}
+suppressPackageStartupMessages(library(randomForest))
+set.seed(3456)
+fitRF <- randomForest(classe ~ ., data=finalMyTraining)
+predictionRF <- predict(fitRF, finalMyTesting, type = "class")
+``` 
+
+* Neural Network
+```{r neuralnetwork, cache=TRUE, results='hide'}
+fitNN <- train(classe ~ ., data=finalMyTraining, method="nnet")
+predictionNN <- predict(fitNN, finalMyTesting)
+``` 
+
+* Support Vector Machine
+```{r svm, cache=TRUE}
+fitSVM <- train(classe ~ ., data=finalMyTraining, method="svmLinear")
+predictionSVM <- predict(fitSVM, finalMyTesting)
+```
+
+* k-Nearest Neighbors
+```{r knn, cache=TRUE}
+fitKNN <- train(classe ~ ., data=finalMyTraining, method="knn")
+predictionKNN <- predict(fitKNN, finalMyTesting)
+``` 
+
+
+* Gradient Boosted Machine
+```{r gbm, cache=TRUE, results='hide'}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+fitGBM <- train(classe ~ ., data=finalMyTraining, method="gbm", trControl = fitControl)
+predictionGBM <- predict(fitGBM, finalMyTesting)
+```
+
+
+## Model Evaluation
+
+As a next step we are going to evaluate the generated models.
+We are going to look at the Confusion Matrix of the results based on the predictions on the test data set.
+
+```{r modelevaluation, cache=TRUE}
+ConfMatrixRPart <- confusionMatrix(predictionsRPart, finalMyTesting$classe)
+ConfMatrixRF <- confusionMatrix(predictionRF, finalMyTesting$classe)
+ConfMatrixNN <- confusionMatrix(predictionNN, finalMyTesting$classe)
+ConfMatrixSVM <- confusionMatrix(predictionSVM, finalMyTesting$classe)
+ConfMatrixKNN <- confusionMatrix(predictionKNN, finalMyTesting$classe)
+ConfMatrixGBM <- confusionMatrix(predictionGBM, finalMyTesting$classe)
+```
+
+## Conclustion
+
+Based on the information provided in the Confusion Matrices (see Appendix) both the Random Forest and the Generalized Boosted Regression models are the best performing ones.
+The Random Forest one is even better, with a very high Accuracy.
+For prediction purposes we will therefore be using the Random Forest Model.
+
+## Appendix
+
+### Exploratory Data Analysis plots:
+
+```{r boxplot, echo=FALSE}
+boxplot(accel_forearm_x ~ classe, data=finalMyTraining, names=c("A", "B", "C", "D", "E"), main="X Acceleration Forearm vs Classe of Exercise Performance", xlab="classe of exercise perfomance", ylab="X Acceleration Forearm")
+```
+
+
+```{r violinplot, echo=FALSE}
+suppressPackageStartupMessages(library(vioplot))
+xA <- finalMyTraining$accel_forearm_x[finalMyTraining$classe=='A']
+xB <- finalMyTraining$accel_forearm_x[finalMyTraining$classe=='B']
+xC <- finalMyTraining$accel_forearm_x[finalMyTraining$classe=='C']
+xD <- finalMyTraining$accel_forearm_x[finalMyTraining$classe=='D']
+xE <- finalMyTraining$accel_forearm_x[finalMyTraining$classe=='E']
+vioplot(xA, xB, xC, xD, xE, names=c("A", "B", "C", "D", "E"))
+```
+
+### Confusion Matrices
+
+```{r confusionmatrix}
+ConfMatrixRPart
+ConfMatrixRF
+ConfMatrixNN
+ConfMatrixSVM
+ConfMatrixKNN
+ConfMatrixGBM
+```
